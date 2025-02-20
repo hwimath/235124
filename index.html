@@ -1,0 +1,750 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <title>문자와 식 빈출 (1)</title>
+  <!-- MathJax 라이브러리 -->
+  <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js" defer></script>
+  <style>
+    body {
+      background-color: #fff;
+      color: #000;
+      font-family: sans-serif;
+      margin: 20px;
+    }
+    h1, h2, h3 {
+      margin-top: 0;
+      margin-bottom: 0.5em;
+    }
+    .hidden {
+      display: none;
+    }
+    .question-container {
+      margin-bottom: 1em;
+      border: 1px solid #000;
+      padding: 1em;
+    }
+    .choice-btn {
+      display: block;
+      margin: 0.3em 0;
+      border: 1px solid #000;
+      background-color: #fff;
+      color: #000;
+      cursor: pointer;
+      padding: 0.5em;
+      text-align: left;
+    }
+    .choice-btn:hover {
+      background-color: #eee;
+    }
+    .info-box {
+      margin: 1em 0;
+    }
+    .energy-bar-container {
+      width: 100%;
+      height: 20px;
+      border: 1px solid #000;
+      margin-bottom: 10px;
+    }
+    .energy-bar {
+      background-color: #000;
+      height: 20px;
+      width: 100%;
+      transition: width 0.2s linear;
+    }
+    .center {
+      text-align: center;
+    }
+    .hidden-correct-answer {
+      color: #000;
+      font-weight: bold;
+      margin-top: 10px;
+    }
+    .game-over {
+      font-weight: bold;
+      color: #000;
+      margin-top: 1em;
+      border: 1px solid #000;
+      padding: 1em;
+    }
+    .difficulty-select, .start-game, .next-question, .score-send {
+      margin: 1em 0;
+      padding: 0.5em 1em;
+      border: 1px solid #000;
+      background-color: #fff;
+      cursor: pointer;
+    }
+    .difficulty-select:hover, .start-game:hover, .next-question:hover, .score-send:hover {
+      background-color: #eee;
+    }
+    .name-input {
+      margin: 1em 0;
+    }
+    #response {
+      margin-top: 1em;
+      white-space: pre-wrap;
+      font-size: 0.9em;
+      border: 1px solid #000;
+      padding: 1em;
+    }
+  </style>
+</head>
+<body>
+
+<h1>문자와 식 빈출 (1)</h1>
+
+<div class="info-box">
+  <p>난이도를 선택하세요.</p>
+  <button class="difficulty-select" onclick="selectDifficulty('최상')">최상 (문제당 20점, 20초)</button>
+  <button class="difficulty-select" onclick="selectDifficulty('상')">상 (문제당 15점, 30초)</button>
+  <button class="difficulty-select" onclick="selectDifficulty('중')">중 (문제당 13점, 40초)</button>
+  <button class="difficulty-select" onclick="selectDifficulty('하')">하 (문제당 10점, 시간제한 없음)</button>
+</div>
+
+<div class="info-box name-input">
+  <label for="playerName">이름을 입력하세요:</label>
+  <input type="text" id="playerName" placeholder="이름">
+</div>
+
+<button class="start-game" id="startGameBtn" onclick="startGame()" disabled>게임 시작</button>
+
+<div class="info-box" id="gameStatus" style="display:none;">
+  <p>전체 게임 시간은 계속 흐릅니다. 오답 3번이면 게임 종료!</p>
+  <p id="globalTimerDisplay">전체 진행 시간: 0초 경과</p>
+  <p id="livesDisplay">남은 기회 : 3</p>
+  <p id="scoreDisplay">점수 : 0</p>
+</div>
+
+<div class="question-container hidden" id="questionContainer">
+  <div class="energy-bar-container" id="energyBarContainer">
+    <div class="energy-bar" id="energyBar"></div>
+  </div>
+  <div id="questionText"></div>
+  <div id="choicesArea"></div>
+  <div class="hidden-correct-answer" id="correctAnswerArea"></div>
+  <button class="next-question hidden" id="nextQuestionBtn" onclick="goNextQuestion()">다음 문제</button>
+</div>
+
+<div class="game-over hidden" id="gameOverContainer">
+  <p id="gameOverMessage"></p>
+  <button class="score-send" onclick="sendScore()">점수전송</button>
+  <div id="response"></div>
+</div>
+
+<script>
+  /************************************************************
+   * MathJax 렌더링 보조 함수
+   ************************************************************/
+  function renderMath() {
+    MathJax.typeset();
+  }
+
+  /************************************************************
+   * 서버로 점수 전송
+   ************************************************************/
+  async function saveData(game, name, score, elapsedTime) {
+    const FUNCTION_URL = "https://us-central1-record-f420d.cloudfunctions.net/report";
+
+    const requestData = {
+      game,
+      name,
+      score: parseInt(score, 10),
+      elapsedTime: parseInt(elapsedTime, 10)
+    };
+
+    try {
+      const response = await fetch(FUNCTION_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(requestData)
+      });
+
+      const responseData = await response.json();
+
+      if (response.ok) {
+        document.getElementById('response').innerText =
+          `성공: ${JSON.stringify(responseData, null, 2)}`;
+      } else {
+        document.getElementById('response').innerText =
+          `오류: ${JSON.stringify(responseData, null, 2)}`;
+      }
+    } catch (error) {
+      console.error('요청 실패:', error);
+      document.getElementById('response').innerText =
+        `네트워크 오류: ${error.message}`;
+    }
+  }
+
+  function sendScore() {
+    saveData("문자와 식 빈출 (1)", playerName, totalScore, globalTime);
+  }
+
+  /************************************************************
+   * 전역 변수들
+   ************************************************************/
+  let difficulty = null;
+  let timeLimitPerQuestion = 0; // 초 단위 (하: 0이면 무제한으로 처리)
+  let scorePerQuestion = 0;
+  let questionIndex = 0;        // 첫 라운드용 (0 ~ questionBank.length-1)
+  let questionIndices = [];     // 첫 라운드용 셔플된 인덱스
+  let finishedFirstRound = false;
+  let currentQuestion = null;   // 현재 문제 객체
+  let currentTimer = null;      // 각 문제마다 setInterval 저장
+  let currentTimeLeft = 0;      // 남은 시간
+  let lives = 3;
+  let totalScore = 0;
+  let globalTime = 0;          // 전체 진행 시간(초)
+  let globalTimer = null;
+  let playerName = "";
+
+  /************************************************************
+   * 문제은행 (총 25문항: 유형별 5문제씩)
+   *  - question: 문자열(문제)
+   *  - choices: 보기 배열(길이 5)
+   *  - answer: 정답 인덱스 (0~4)
+   *
+   *  아래 'type5' 문제에서 불필요한 직접 계산 힌트를 모두 제거했습니다.
+   ************************************************************/
+  const questionBank = [
+    // ---------------------------
+    // type1 (곱셈, 나눗셈 기호 식 변형) - 5문항
+    // ---------------------------
+    {
+      question: "다음 중 식 \\(p + q \\times 3 \\div 2\\)를 괄호 없이 올바르게 나타낸 것은?",
+      choices: [
+        "\\(\\dfrac{p + 3q}{2}\\)",
+        "\\(\\dfrac{2p + 3q}{2}\\)",
+        "\\(p + \\dfrac{3q}{2}\\)",   // correct
+        "\\(3(p + q) \\div 2\\)",
+        "\\(\\dfrac{p}{3} + \\dfrac{q}{2}\\)"
+      ],
+      answer: 2
+    },
+    {
+      question: "다음 중 식 \\(-2a \\div 4 \\times b\\)를 괄호 없이 올바르게 나타낸 것은?",
+      choices: [
+        "\\(-\\dfrac{ab}{2}\\)",     // correct
+        "\\(\\dfrac{-2a}{4} - b\\)",
+        "\\(-2a - 4b\\)",
+        "\\(\\dfrac{-2a + b}{4}\\)",
+        "\\(-2\\bigl(a \\div 4b\\bigr)\\)"
+      ],
+      answer: 0
+    },
+    {
+      question: "다음 중 식 \\((m + 2n) \\times 3 \\div 6\\)를 괄호 없이 올바르게 나타낸 것은?",
+      choices: [
+        "\\(m + 2n \\div 6 \\times 3\\)",
+        "\\(\\dfrac{3(m + 2n)}{6}\\)",  // correct
+        "\\(\\dfrac{3m + 2n}{6}\\)",
+        "\\(\\dfrac{m + 2n}{6 + 3}\\)",
+        "\\(m + \\dfrac{2n \\times 3}{6}\\)"
+      ],
+      answer: 1
+    },
+    {
+      question: "다음 중 식 \\(-3x \\times 2 \\div y\\)를 괄호 없이 올바르게 나타낸 것은?",
+      choices: [
+        "\\(-\\dfrac{6x}{y}\\)",     // correct
+        "\\(6x - y\\)",
+        "\\(-3x \\div \\dfrac{2}{y}\\)",
+        "\\(-3(x \\times 2y)\\)",
+        "\\(\\dfrac{-3x + 2}{y}\\)"
+      ],
+      answer: 0
+    },
+    {
+      question: "다음 중 식 \\(x \\div (-2) \\times y\\)를 괄호 없이 올바르게 나타낸 것은?",
+      choices: [
+        "\\(-\\dfrac{xy}{2}\\)",    // correct
+        "\\(\\dfrac{x - 2y}{-1}\\)",
+        "\\(x \\times \\dfrac{-2}{y}\\)",
+        "\\(-2x \\div y\\)",
+        "\\(\\dfrac{x}{-2y}\\)"
+      ],
+      answer: 0
+    },
+
+    // ---------------------------
+    // type2 (특정 a,b 값 대입 계산) - 5문항
+    // ---------------------------
+    {
+      question: "다음에서 \\(a=\\dfrac{1}{2},\\; b=\\dfrac{1}{3}\\)일 때, 식 \\(-a^2 - \\dfrac{1}{b}\\)의 값을 구하시오.",
+      choices: [
+        "\\(-\\dfrac{11}{4}\\)",
+        "\\(-\\dfrac{13}{4}\\)", // correct
+        "\\(-\\dfrac{15}{4}\\)",
+        "\\(-\\dfrac{17}{4}\\)",
+        "\\(-\\dfrac{19}{4}\\)"
+      ],
+      answer: 1
+    },
+    {
+      question: "다음에서 \\(a=\\dfrac{2}{3},\\; b=\\dfrac{1}{6}\\)일 때, 식 \\(2a - 3b\\)의 값을 구하시오.",
+      choices: [
+        "\\(\\dfrac{1}{2}\\)",
+        "\\(\\dfrac{5}{6}\\)", // correct
+        "\\(\\dfrac{7}{6}\\)",
+        "\\(\\dfrac{3}{2}\\)",
+        "\\(1\\)"
+      ],
+      answer: 1
+    },
+    {
+      question: "다음에서 \\(x=\\dfrac{3}{4},\\; y=\\dfrac{2}{3}\\)일 때, 식 \\(3x + y\\)의 값을 구하시오.",
+      choices: [
+        "\\(\\dfrac{35}{12}\\)", // correct
+        "\\(\\dfrac{17}{6}\\)",
+        "\\(\\dfrac{11}{4}\\)",
+        "\\(\\dfrac{37}{12}\\)",
+        "\\(3\\)"
+      ],
+      answer: 0
+    },
+    {
+      question: "다음에서 \\(p=\\dfrac{1}{4},\\; q=\\dfrac{5}{6}\\)일 때, 식 \\(4p - 2q\\)의 값을 구하시오.",
+      choices: [
+        "\\(-\\dfrac{2}{3}\\)", // correct
+        "\\(\\dfrac{2}{3}\\)",
+        "\\(-2\\)",
+        "\\(\\dfrac{1}{3}\\)",
+        "\\(-\\dfrac{5}{3}\\)"
+      ],
+      answer: 0
+    },
+    {
+      question: "다음에서 \\(m=\\dfrac{3}{5},\\; n=\\dfrac{4}{5}\\)일 때, 식 \\(mn - m\\)의 값을 구하시오.",
+      choices: [
+        "\\(\\dfrac{3}{25}\\)",
+        "\\(-\\dfrac{3}{25}\\)", // correct
+        "\\(-\\dfrac{1}{5}\\)",
+        "\\(-\\dfrac{12}{25}\\)",
+        "\\(\\dfrac{1}{25}\\)"
+      ],
+      answer: 1
+    },
+
+    // ---------------------------
+    // type5 (a,b 대입 후 가장 큰 값/작은 값) - 5문항
+    //  -- 불필요한 직접 계산 힌트를 제거했습니다.
+    // ---------------------------
+    {
+      question: "다음 중 \\(a=-2,\\; b=1\\)일 때, 식의 값이 가장 작은 것은?",
+      choices: [
+        "\\(-3a + b\\)",
+        "\\(a^2 + b\\)",
+        "\\(-\\dfrac{a + b}{2}\\)", // correct
+        "\\((\\!-a)^2 - b^2\\)",
+        "\\(4b \\div a^2\\)"
+      ],
+      answer: 2
+    },
+    {
+      question: "다음 중 \\(a=2,\\; b=-1\\)일 때, 식의 값이 가장 큰 것은?",
+      choices: [
+        "\\(a - 2b\\)",
+        "\\(-2a + b^2\\)",
+        "\\(ab - b\\)",
+        "\\(a^2 + 2b^2\\)", // correct
+        "\\(3 - ab\\)"
+      ],
+      answer: 3
+    },
+    {
+      question: "다음 중 \\(a=-1,\\; b=-3\\)일 때, 식의 값이 가장 작은 것은?",
+      choices: [
+        "\\(a^2 - b\\)",
+        "\\(2a + b\\)", // correct
+        "\\(ab - 1\\)",
+        "\\(-2a + b^2\\)",
+        "\\(a - b\\)"
+      ],
+      answer: 1
+    },
+    {
+      question: "다음 중 \\(a=0,\\; b=4\\)일 때, 식의 값이 가장 큰 것은?",
+      choices: [
+        "\\(a^2 + 3b\\)", // correct
+        "\\(ab - 2\\)",
+        "\\(2(a + b)\\)",
+        "\\(5 - b^2\\)",
+        "\\(-a - b\\)"
+      ],
+      answer: 0
+    },
+    {
+      question: "다음 중 \\(a=1,\\; b=2\\)일 때, 식의 값이 가장 작은 것은?",
+      choices: [
+        "\\(3a - b\\)",
+        "\\(ab - 1\\)",
+        "\\(a^2 - b^2\\)",
+        "\\(b - a\\)",
+        "\\(-2(a + b)\\)" // correct
+      ],
+      answer: 4
+    },
+
+    // ---------------------------
+    // type7 (거스름돈 구하기) - 5문항
+    // ---------------------------
+    {
+      question: "민수는 어머니의 부탁으로 시장에 심부름을 갔습니다. \\(x\\)원짜리 고구마 2봉지와 \\(y\\)원짜리 사과 3개를 샀고, 5000원을 냈습니다. 민수가 받아야 할 거스름돈을 나타내는 식으로 옳은 것은?",
+      choices: [
+        "\\(5000 - (2x + 3y)\\)", // correct
+        "\\(5000 + 2x + 3y\\)",
+        "\\(5000 - 2xy - 3\\)",
+        "\\((5000 - 2x) \\times 3y\\)",
+        "\\(2x + 3y - 5000\\)"
+      ],
+      answer: 0
+    },
+    {
+      question: "지영이는 분식점에서 \\(m\\)원짜리 떡볶이 1인분과 \\(n\\)원짜리 튀김 2개를 샀습니다. 10000원을 냈다면, 거스름돈을 나타내는 식으로 옳은 것은?",
+      choices: [
+        "\\(10000 - (m + 2n)\\)", // correct
+        "\\(10000 - m - 2n + 1\\)",
+        "\\(10000 + (m + 2n)\\)",
+        "\\((m + 2n) - 10000\\)",
+        "\\(10000 - mn\\)"
+      ],
+      answer: 0
+    },
+    {
+      question: "정우는 문구점에서 \\(x\\)원짜리 공책 4권과 \\(y\\)원짜리 볼펜 1자루를 샀습니다. 5000원을 지불했다면, 거스름돈을 나타내는 식으로 옳은 것은?",
+      choices: [
+        "\\(5000 - (4x + y)\\)", // correct
+        "\\(4x + y - 5000\\)",
+        "\\(5000 - 4xy\\)",
+        "\\((5000 - 4x) + y\\)",
+        "\\(5000 + 4x + y\\)"
+      ],
+      answer: 0
+    },
+    {
+      question: "진수는 과일 가게에서 \\(p\\)원짜리 바나나 3개와 \\(q\\)원짜리 포도 2송이를 샀습니다. 10000원을 냈다면, 거스름돈을 나타내는 식으로 옳은 것은?",
+      choices: [
+        "\\(10000 - (3p + 2q)\\)", // correct
+        "\\(10000 + (3p + 2q)\\)",
+        "\\((3p + 2q) - 10000\\)",
+        "\\(3pq - 10000\\)",
+        "\\(10000 - 3p - 2q\\)"
+      ],
+      answer: 0
+    },
+    {
+      question: "선아는 서점에서 \\(r\\)원짜리 만화책 2권과 \\(s\\)원짜리 참고서 1권을 샀습니다. 5000원을 지불했다면, 거스름돈을 나타내는 식으로 옳은 것은?",
+      choices: [
+        "\\(5000 - (2r + s)\\)", // correct
+        "\\(5000 + 2r + s\\)",
+        "\\((2r + s) - 5000\\)",
+        "\\(5000 - 2rs\\)",
+        "\\(2r - s - 5000\\)"
+      ],
+      answer: 0
+    },
+
+    // ---------------------------
+    // type8 (문자를 사용한 식으로 옳지 않은 것) - 5문항
+    // ---------------------------
+    {
+      question: "다음 중 문자를 사용하여 나타낸 식으로 옳지 않은 것은? (\\(x\\)는 1개당 가격, \\(y\\)는 개수)",
+      choices: [
+        "개당 \\(x\\)원 하는 공책 \\(y\\)권의 총 가격은 \\(xy\\)원이다.",
+        "개당 \\(x\\)원 하는 연필 \\(y+1\\)자루의 총 가격은 \\(x(y+1)\\)원이다.",
+        "개당 \\(x\\)원 하는 사탕 \\(y-2\\)개를 산 후, 거스름돈이 \\(5000 - x(y-2)\\)원이다.",
+        "개당 \\(y\\)원 하는 우유 \\(x\\)팩을 샀을 때의 총 가격은 \\(xy\\)원이다.",
+        "개당 \\(x+y\\)원 하는 과자 \\(y\\)봉지를 샀을 때의 총 가격은 \\(xy + y\\)원이다." // incorrect
+      ],
+      answer: 4
+    },
+    {
+      question: "다음 중 문자를 사용하여 나타낸 식으로 옳지 않은 것은? (\\(m\\)는 하루 작업량, \\(n\\)는 일한 날짜 수)",
+      choices: [
+        "하루에 \\(m\\)개의 물건을 만드는 공장에서 \\(n\\)일간 만든 물건의 총개수는 \\(mn\\)개이다.",
+        "하루에 \\(m\\)원씩 저금하면 \\(n\\)일간 저금하는 총액은 \\(mn\\)원이다.",
+        "하루에 \\(m+1\\)원씩 저금하면 \\(n\\)일간 저금하는 총액은 \\((m+1)n\\)원이다.",
+        "하루에 \\(m\\)페이지씩 읽으면 \\(n\\)일 동안 읽은 페이지 수는 \\(mn\\)페이지이다.",
+        "하루에 \\(m\\)개씩 사용하는 물건을 \\(n\\)일 사용했을 때, 총 사용량은 \\(m+n\\)개이다." // incorrect
+      ],
+      answer: 4
+    },
+    {
+      question: "다음 중 문자를 사용하여 나타낸 식으로 옳지 않은 것은? (\\(a\\)는 시속, \\(t\\)는 시간)",
+      choices: [
+        "시속 \\(a\\)km로 \\(t\\)시간 이동한 거리는 \\(at\\)km이다.",
+        "시속 \\(a\\)km로 \\(t+1\\)시간 이동한 거리는 \\(a(t+1)\\)km이다.",
+        "시속 \\(a+1\\)km로 \\(t\\)시간 이동한 거리는 \\((a+1)t\\)km이다.",
+        "시속 \\(t\\)km로 \\(a\\)시간 이동한 거리는 \\(at\\)km이다.",
+        "시속 \\(a\\)km로 \\(t\\)시간 이동한 거리가 \\(a+t\\)km이다." // incorrect
+      ],
+      answer: 4
+    },
+    {
+      question: "다음 중 문자를 사용하여 나타낸 식으로 옳지 않은 것은? (\\(p\\)는 1인분 무게, \\(q\\)는 인원수)",
+      choices: [
+        "1인분 무게가 \\(p\\)g일 때, \\(q\\)명이 먹을 수 있는 총 무게는 \\(pq\\)g이다.",
+        "\\(q\\)명이 먹는 양이 \\(p\\)g이라면, 1인분 무게는 \\(\\dfrac{p}{q}\\)g이다.",
+        "1인분 무게가 \\(p+10\\)g일 때, \\(q+1\\)명이 먹을 수 있는 총 무게는 \\((p+10)(q+1)\\)g이다.",
+        "1인분 무게가 \\(p\\)g일 때, \\(q-1\\)명이 먹을 수 있는 총 무게는 \\(p(q-1)\\)g이다.",
+        "1인분 무게가 \\(p\\)g일 때, \\(q\\)명이 먹는 총 무게는 \\(p+q\\)g이다." // incorrect
+      ],
+      answer: 4
+    },
+    {
+      question: "다음 중 문자를 사용하여 나타낸 식으로 옳지 않은 것은? (\\(r\\)는 1학년 수, \\(s\\)는 2학년 수)",
+      choices: [
+        "1학년이 \\(r\\)명, 2학년이 \\(s\\)명이면, 총 학생수는 \\(r + s\\)명이다.",
+        "1학년이 \\(r\\)명, 2학년이 \\(s\\)명일 때, 모든 학생에게 간식을 1개씩 준다면 총 \\(r + s\\)개의 간식이 필요하다.",
+        "1학년이 \\(r+1\\)명, 2학년이 \\(s\\)명이면, 총 학생수는 \\((r+1) + s\\)명이다.",
+        "1학년이 \\(r\\)명, 2학년이 \\(s-2\\)명일 때, 총 학생수는 \\(r + (s-2)\\)명이다.",
+        "1학년이 \\(r\\)명, 2학년이 \\(s\\)명일 때, 총 학생수는 \\(rs\\)명이다." // incorrect
+      ],
+      answer: 4
+    }
+  ];
+
+  /************************************************************
+   * 난이도 선택
+   ************************************************************/
+  function selectDifficulty(level) {
+    difficulty = level;
+    switch(difficulty) {
+      case "최상":
+        timeLimitPerQuestion = 20;
+        scorePerQuestion = 20;
+        break;
+      case "상":
+        timeLimitPerQuestion = 30;
+        scorePerQuestion = 15;
+        break;
+      case "중":
+        timeLimitPerQuestion = 40;
+        scorePerQuestion = 13;
+        break;
+      case "하":
+        timeLimitPerQuestion = 0; // 무제한
+        scorePerQuestion = 10;
+        break;
+    }
+    document.getElementById("startGameBtn").disabled = false;
+  }
+
+  /************************************************************
+   * 게임 시작
+   ************************************************************/
+  function startGame() {
+    const nameInput = document.getElementById("playerName");
+    if(!nameInput.value.trim()) {
+      alert("이름을 입력하세요!");
+      return;
+    }
+    playerName = nameInput.value.trim();
+
+    // 초기화
+    questionIndex = 0;
+    finishedFirstRound = false;
+    lives = 3;
+    totalScore = 0;
+    globalTime = 0;
+    clearInterval(globalTimer);
+
+    // 문제 인덱스 셔플
+    questionIndices = [];
+    for (let i=0; i<questionBank.length; i++) {
+      questionIndices.push(i);
+    }
+    shuffleArray(questionIndices);
+
+    // UI 표시
+    document.getElementById("gameStatus").style.display = "block";
+    document.getElementById("questionContainer").classList.add("hidden");
+    document.getElementById("gameOverContainer").classList.add("hidden");
+    document.getElementById("startGameBtn").disabled = true;
+
+    // 전체 시간 타이머 시작
+    globalTimer = setInterval(()=>{
+      globalTime++;
+      document.getElementById("globalTimerDisplay").textContent = "전체 진행 시간: " + globalTime + "초 경과";
+    }, 1000);
+
+    updateLivesDisplay();
+    updateScoreDisplay();
+
+    // 첫 문제 표시
+    showNextQuestion();
+  }
+
+  /************************************************************
+   * 문제 표시
+   ************************************************************/
+  function showNextQuestion() {
+    document.getElementById("questionContainer").classList.remove("hidden");
+    document.getElementById("nextQuestionBtn").classList.add("hidden");
+    document.getElementById("correctAnswerArea").textContent = "";
+    
+    // 첫 라운드 중이면 questionIndex 사용, 아니면 랜덤
+    let qIndex = 0;
+    if(!finishedFirstRound) {
+      qIndex = questionIndices[questionIndex];
+    } else {
+      // 이미 1바퀴 돌았으니 랜덤
+      qIndex = Math.floor(Math.random() * questionBank.length);
+    }
+    currentQuestion = questionBank[qIndex];
+
+    // 문제 텍스트
+    document.getElementById("questionText").innerHTML = currentQuestion.question;
+
+    // 보기 셔플
+    const c = currentQuestion.choices.slice();
+    const cIndexArr = [0,1,2,3,4];
+    shuffleArray(cIndexArr);
+
+    // 보기 렌더
+    const choicesArea = document.getElementById("choicesArea");
+    choicesArea.innerHTML = "";
+    for(let i=0; i<5; i++) {
+      const btn = document.createElement("button");
+      btn.className = "choice-btn";
+      btn.dataset.choiceIndex = cIndexArr[i];
+      btn.innerHTML = c[cIndexArr[i]];
+      btn.onclick = function(){ checkAnswer(parseInt(this.dataset.choiceIndex)); };
+      choicesArea.appendChild(btn);
+    }
+
+    // 시간 제한 처리
+    if(timeLimitPerQuestion > 0) {
+      currentTimeLeft = timeLimitPerQuestion;
+      startEnergyBar();
+    } else {
+      // 하(무제한)
+      document.getElementById("energyBarContainer").style.display = "none";
+    }
+
+    // 첫 라운드인 경우 questionIndex 증가
+    if(!finishedFirstRound) {
+      questionIndex++;
+      if(questionIndex >= questionBank.length) {
+        finishedFirstRound = true;
+      }
+    }
+
+    // 수식 렌더링
+    renderMath();
+  }
+
+  /************************************************************
+   * 보기 정답 체크
+   ************************************************************/
+  function checkAnswer(chosenIndex) {
+    stopEnergyBar(); // 시간 카운트 정지
+
+    // 정답 인덱스
+    const correctIndex = currentQuestion.answer; 
+    const correctChoiceText = currentQuestion.choices[correctIndex];
+
+    if(chosenIndex === correctIndex) {
+      // 정답
+      totalScore += scorePerQuestion;
+      updateScoreDisplay();
+      document.getElementById("correctAnswerArea").textContent = "정답! (정답 표현: " + correctChoiceText + ")";
+    } else {
+      // 오답
+      lives--;
+      updateLivesDisplay();
+      document.getElementById("correctAnswerArea").textContent = "오답! 정답은 " + correctChoiceText + " 입니다.";
+      if(lives <= 0) {
+        gameOver("오답 3회로 게임 종료!");
+        return;
+      }
+    }
+
+    document.getElementById("nextQuestionBtn").classList.remove("hidden");
+  }
+
+  /************************************************************
+   * 다음 문제 이동
+   ************************************************************/
+  function goNextQuestion() {
+    document.getElementById("correctAnswerArea").textContent = "";
+    // 문제 계속 출제
+    showNextQuestion();
+  }
+
+  /************************************************************
+   * 에너지바(시간 제한) 처리
+   ************************************************************/
+  function startEnergyBar() {
+    document.getElementById("energyBarContainer").style.display = "block";
+    const bar = document.getElementById("energyBar");
+    bar.style.width = "100%";
+
+    clearInterval(currentTimer);
+    currentTimer = setInterval(()=>{
+      currentTimeLeft--;
+      if(currentTimeLeft < 0) {
+        // 시간초과
+        stopEnergyBar();
+        timeOver();
+      } else {
+        const ratio = (currentTimeLeft / timeLimitPerQuestion)*100;
+        bar.style.width = ratio + "%";
+      }
+    }, 1000);
+  }
+
+  function stopEnergyBar() {
+    clearInterval(currentTimer);
+  }
+
+  function timeOver() {
+    // 시간초과 -> 오답 처리와 동일하게 life--
+    lives--;
+    updateLivesDisplay();
+    const correctIndex = currentQuestion.answer;
+    const correctChoiceText = currentQuestion.choices[correctIndex];
+    document.getElementById("correctAnswerArea").textContent =
+      "시간초과! 정답은 " + correctChoiceText + " 입니다.";
+
+    if(lives <= 0) {
+      gameOver("오답/시간초과 3회로 게임 종료!");
+    } else {
+      document.getElementById("nextQuestionBtn").classList.remove("hidden");
+    }
+  }
+
+  /************************************************************
+   * 유틸 함수들
+   ************************************************************/
+  function shuffleArray(array) {
+    for(let i = array.length -1; i>0; i--){
+      const j = Math.floor(Math.random() * (i+1));
+      [array[i], array[j]] = [array[j], array[i]];
+    }
+  }
+
+  function updateLivesDisplay() {
+    document.getElementById("livesDisplay").textContent = "남은 기회 : " + lives;
+  }
+
+  function updateScoreDisplay() {
+    document.getElementById("scoreDisplay").textContent = "점수 : " + totalScore;
+  }
+
+  /************************************************************
+   * 게임 종료
+   ************************************************************/
+  function gameOver(msg) {
+    stopEnergyBar();
+    clearInterval(globalTimer);
+    document.getElementById("questionContainer").classList.add("hidden");
+    document.getElementById("gameOverContainer").classList.remove("hidden");
+    document.getElementById("gameOverMessage").textContent = msg + 
+      "  최종 점수: " + totalScore + "점 (총 소요시간: " + globalTime + "초)";
+  }
+</script>
+
+</body>
+</html>
